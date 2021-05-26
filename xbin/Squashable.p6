@@ -25,8 +25,8 @@ unit class Squashable does Whateverable;
 
 my $WIKI-PAGE-URL = ‘https://github.com/rakudo/rakudo/wiki/Monthly-Bug-Squash-Day’;
 my $WIKI-PAGE-URL-RAW = ‘https://raw.githubusercontent.com/wiki/rakudo/rakudo/Monthly-Bug-Squash-Day.md’;
-my $TIMEZONE-RANGE = (-12..14) × 60×60; # in seconds (let's be inclusive?)
-my $CHANNEL = %*ENV<DEBUGGABLE> ?? ‘#whateverable’ !! ‘#perl6’;
+my $TIMEZONE-RANGE = (-12..20) × 60×60; # in seconds (let's be inclusive?)
+my $CHANNEL = %*ENV<DEBUGGABLE> ?? ‘#whateverable’ !! ‘#raku’;
 my $PATH = ‘data/squashable’.IO;
 
 my $next-event-lock = Lock.new;
@@ -102,10 +102,10 @@ multi method irc-to-me($msg where /^ \s* [log|status|info|when|next]
     if $msg !~~ /‘log’/ and not $date {
         if now < $next-range.min {
             my $warn = ($next-range.min - now)÷60÷60÷24 < 7 ?? ‘⚠🍕 ’ !! ‘’;
-            $msg.reply: “{$warn}Next SQUASHathon {time-left $next-range.min} $when”
+            reply $msg, “{$warn}Next SQUASHathon {time-left $next-range.min} $when”
                             ~ “. See $WIKI-PAGE-URL”
         } else {
-            $msg.reply: “🍕🍕 SQUASHathon is in progress!”
+            reply $msg, “🍕🍕 SQUASHathon is in progress!”
                          ~ “ The end of the event {time-left $next-range.max}”
                          ~ “. See $WIKI-PAGE-URL”
         }
@@ -314,8 +314,6 @@ my $react = start react {
     }
 }
 
-
-my %*BOT-ENV;
 
 $squashable.selfrun: ‘squashable6’, [ / squash6? <before ‘:’> /,
                                       fuzzy-nick(‘squashable6’, 3) ]

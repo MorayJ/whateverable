@@ -48,7 +48,6 @@ subtest ‘all channels have recent data’, {
     my @tracked-channels = dir ‘data/irc’, test => { .starts-with(‘#’) && “data/irc/$_”.IO.d };
     ok @tracked-channels > 0, ‘at least one channel is tracked’;
     for @tracked-channels {
-        dd $_;
         my $exists = “$_/{DateTime.now.earlier(:2days).Date}”.IO.e;
         todo ‘outdated data (issue #192)’, 3;
         ok $exists, “{.basename} is up-to-date (or was up-to-date 2 days ago)”;
@@ -58,6 +57,14 @@ subtest ‘all channels have recent data’, {
                “$_ cache file was recently updated”;
     }
 }
+
+# Timeouts
+
+$t.test(‘timeout’,
+        ‘{$t.bot-nick}: / {sleep ∞} /’,
+        /^ <{$t.our-nick}>‘, OK, working on it! This may take up to three minutes (’\d+‘ messages to process)’ $/,
+        “{$t.our-nick}, timed out after 180 seconds» «exit signal = SIGHUP (1)»”,
+        :190timeout);
 
 $t.last-test;
 done-testing;

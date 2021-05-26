@@ -6,13 +6,14 @@
 
     "archives-location"        : "./data/builds",
     "builds-location"          : "/tmp/whateverable/",
+    "sandbox-path"             : "./sandbox",
 
     "moarvm" : "./data/moarvm",
 
-    "source" : "https://github.com/perl6/whateverable",
-    "wiki"   : "https://github.com/perl6/whateverable/wiki/",
+    "source" : "https://github.com/Raku/whateverable",
+    "wiki"   : "https://github.com/Raku/whateverable/wiki/",
 
-    "message-limit" :   260,
+    "message-limit" :   390,
     "gist-limit"    : 10000,
     "commits-limit" :   500,
     "cave"          : "#whateverable",
@@ -51,7 +52,7 @@
         "port": 42434
     },
     "releasable": {
-        "spammed-channels": ["#perl6-dev", "#whateverable"],
+        "spammed-channels": ["#raku-dev", "#whateverable"],
         "spam-before":          604800,
         "spam-every":            72000,
         "spam-exception-delay":   3600

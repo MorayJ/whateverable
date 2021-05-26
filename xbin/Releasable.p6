@@ -30,14 +30,14 @@ unit class Releasable does Whateverable;
 # ↓ when needed
 my $SHA-LENGTH       = 8;
 my $RELEASE-HOUR     = 19; # GMT+0
-my $BLOCKERS-URL-RT  = ‘https://fail.rakudo.party/release/blockers.json’;
-my $BLOCKERS-URL-GH  = ‘https://api.github.com/repos/rakudo/rakudo/issues?state=open&labels=%E2%9A%A0%20blocker%20%E2%9A%A0’;
+my $BLOCKERS-URL-GH  = ‘https://api.github.com/search/issues?q=is:open%20is:issue%20archived:false%20user:rakudo%20user:moarvm%20user:perl6%20label:BLOCKER’;
 my $DRAFT-URL        = ‘https://raw.github.com/wiki/rakudo/rakudo/ChangeLog-Draft.md’;
 my $DRAFT-USER-URL   = ‘https://github.com/rakudo/rakudo/wiki/ChangeLog-Draft’;
 
 method help($msg) {
     “status | status link”
 }
+method private-messages-allowed() { True }
 
 sub ignored-commits() {
     my $last-release = to-full-commit chomp slurp “$CONFIG<rakudo>/VERSION”;
@@ -78,13 +78,13 @@ sub parse-next-release($msg) {
         if not to-full-commit $release {
             $important-date = $_;
             if not .<manager> and not $annoying-warning {
-                $msg.reply: “Release manager is not specified yet.”
+                reply $msg, “Release manager is not specified yet.”
             }
             last
         }
         if not $annoying-warning {
             $annoying-warning = True;
-            $msg.reply: “Release date for Rakudo $release is listed in”
+            reply $msg, “Release date for Rakudo $release is listed in”
                   ~ “ “Planned future releases”, but it was already released.”;
         }
     }
@@ -134,20 +134,6 @@ sub changelog-to-stats($changelog) {
     { :$summary, :@unlogged, :@warnings }
 }
 
-sub blockers-rt() {
-    use HTTP::UserAgent;
-    my $ua = HTTP::UserAgent.new: :useragent<Whateverable>;
-    my $response = try { $ua.get: $BLOCKERS-URL-RT };
-    return ‘R6 is down’ without $response;
-    return ‘R6 is down’ unless $response.is-success;
-    if $response.content-type ne ‘application/json;charset=UTF-8’ {
-        return ‘Cannot parse the data from R6’
-    }
-    my %data = from-json $response.decoded-content;
-    return ‘Cannot parse the data from R6’ unless %data<tickets>:exists;
-    %data<tickets>.List
-}
-
 sub blockers-github() {
     use HTTP::UserAgent;
     my $ua = HTTP::UserAgent.new: :useragent<Whateverable>;
@@ -157,13 +143,13 @@ sub blockers-github() {
     if $response.content-type ne ‘application/json; charset=utf-8’ {
         return ‘Cannot parse the data from GitHub’
     }
-    from-json($response.decoded-content).List
+    from-json($response.decoded-content)<items>.List
 }
 
 sub blockers {
     my @tickets;
     my $summary = ‘’;
-    for (blockers-rt(), blockers-github()) {
+    for (blockers-github(),) {
         when Str        { $summary ~= ‘, ’ if $summary; $summary ~= $_ }
         when Positional { @tickets.append: $_ }
         default         { die “Expected Str or Positional but got {.^name}” }
@@ -181,7 +167,7 @@ sub blockers {
         my $url   = .<html_url> // .<url>;
         my $id    = .<number>   // .<ticket_id>;
         my $title = .<title>    // .<subject>;
-        $id = (.<html_url> ?? ‘GH#’ !! ‘RT#’) ~ $id; # ha-ha 🙈
+        $id = ‘GH#’ ~ $id;
         $id .= fmt: ‘% 9s’;
         “<a href="$url">” ~ $id ~ “</a> {html-escape $title}\n”
     }
@@ -219,7 +205,7 @@ multi method irc-to-me($msg where /^ :i \s*
     $answer ~= “$_. ” with %blockers<summary>;
     $answer ~= %stats<summary>;
     $answer ~= “ (⚠ {+%stats<warnings>} warnings)” if %stats<warnings>;
-    $msg.reply: $answer;
+    reply $msg, $answer;
     return if none %blockers<list>, %stats<unlogged>, %stats<warnings>;
 
     # ↓ And here just to make a pretty gist ↓
@@ -279,7 +265,7 @@ multi method irc-connected($msg) {
 }
 
 
-my %*BOT-ENV = branch => ‘master’;
+%*BOT-ENV<branch> = ‘master’;
 
 Releasable.new.selfrun: ‘releasable6’, [ / release6? <before ‘:’> /,
                                          fuzzy-nick(‘releasable6’, 2) ]

@@ -29,6 +29,7 @@ use Text::Diff::Sift4;
 use Whateverable::Bits;
 use Whateverable::Configurable;
 use Whateverable::Config;
+use Whateverable::Discordable;
 use Whateverable::Heartbeat;
 use Whateverable::Messages;
 use Whateverable::Processing;
@@ -39,23 +40,26 @@ unit role Whateverable does IRC::Client::Plugin;
 
 also does Helpful;
 also does Whateverable::Configurable;
+also does Whateverable::Discordable;
 
 method TWEAK {
-    %*BOT-ENV<timeout> //= 10;
     # wrap around everything to catch exceptions
     once { # per class
         self.^lookup(‘irc-to-me’).wrap: sub ($self, $msg) {
-            return if $msg.channel ne $CONFIG<cave> and $msg.args[1].starts-with: ‘what:’;
+            return if $msg.?channel and $msg.channel ne $CONFIG<cave>
+                      and $msg.args[1].starts-with: ‘what:’;
             # ↑ ideally this check shouldn't be here, but it's much harder otherwise
 
-            LEAVE sleep 0.02; # https://github.com/perl6/whateverable/issues/163
+            LEAVE sleep 0.02; # https://github.com/Raku/whateverable/issues/163
             try {
                 my $result = callsame;
                 return without $result;
                 return $result but Reply($msg) if $result !~~ Promise;
                 return start sub {
-                    try return (await $result) but Reply($msg);
-                    handle-exception $!, $msg
+                    my $awaited = try await $result;
+                    return handle-exception $_, $msg with $!;
+                    return without $awaited;
+                    return $awaited but Reply($msg);
                 }()
             }
             handle-exception $!, $msg
@@ -100,16 +104,38 @@ multi method irc-to-me(Message $msg where .text ~~ /:i^ uptime \s* $/) {
     use Telemetry;
     (denominate now - $*INIT-INSTANT) ~ ‘, ’
     ~ T<max-rss>.fmt(‘%.2f’) ÷ 1024 ~ ‘MiB maxrss. ’
-    ~ (with nqp::getcomp("perl6") {
+    ~ (with (nqp::getcomp("Raku") || nqp::getcomp("perl6")) {
         “This is {.implementation} version {.config<version>} ”
         ~ “built on {.backend.version_string} ”
         ~ “implementing {.language_name} {.language_version}.”
      })
 }
+#| You're welcome!
+sub you're-welcome is export {
+    «
+    ‘You're welcome!’
+    ‘I'm happy to help!’
+    ‘Anytime!’
+    ‘It's my pleasure!’
+    ‘Thank you! You love me, you really love me!’
+    ‘\o/’
+    »
+}
+#| Replying to thanks
+multi method irc-to-me(Message $msg where .text ~~ /:i^ [‘thank you’|‘thanks’] \s* /) {
+    you're-welcome.pick
+}
+#| Replying to thanks
+multi method irc-privmsg-channel($msg where .text ~~ /:i [‘thank you’|‘thanks’] .* $($msg.server.current-nick) /) {
+    you're-welcome.pick
+}
 #↓ Notices
 multi method irc-notice-me( $ --> Nil)                             {} # Issue #321
 #↓ Private messages
-multi method irc-privmsg-me($ --> ‘Sorry, it is too private here’) {} # TODO issue #16
+method private-messages-allowed() { False }
+multi method irc-privmsg-me($ where not $.private-messages-allowed) { # TODO issue #16
+    ‘Sorry, it is too private here. You can join #whateverable channel instead’
+}
 #↓ Fallback
 multi method irc-to-me($) {
     ‘I cannot recognize this command. See wiki for some examples: ’ ~ self.get-wiki-link
@@ -140,14 +166,16 @@ multi method filter($response where
         %files<query> = $_ with $response.?msg.?text;
         %files<query>:delete unless %files<query>;
     }
-    my $url = self.upload: %files, public => !%*ENV<DEBUGGABLE>, :$description;
+    my $url = upload %files, public => !%*ENV<DEBUGGABLE>, :$description;
     $url = $response.link-msg()($url) if $response ~~ PrettyLink;
     $url
 }
 
 #↓ Regular response (not a gist)
 multi method filter($text is copy) {
-    ansi-to-irc($text).trans:
+    ansi-to-irc($text)
+    .trans([“\r\n”] => [‘␍␤’])
+    .trans:
         “\n” => ‘␤’,
         3.chr => 3.chr, 0xF.chr => 0xF.chr, # keep these for IRC colors
         |((^32)».chr Z=> (0x2400..*).map(*.chr)), # convert all unreadable ASCII crap
@@ -155,10 +183,9 @@ multi method filter($text is copy) {
 }
 
 #↓ Gists %files and returns a link
-method upload(%files is copy, :$description = ‘’, Bool :$public = True) {
+sub upload(%files is copy, :$description = ‘’, Bool :$public = True) is export {
     if %*ENV<TESTABLE> {
-        my $nick = $.irc.servers.values[0].current-nick;
-        my $gists-path = “$CONFIG<builds-location>/tist/$nick”;
+        my $gists-path = %*ENV<TESTABLE_GISTS>;
         rmtree $gists-path if $gists-path.IO ~~ :d;
         mkdir $gists-path;
         spurt “$gists-path/{.key}”, .value for %files;
@@ -178,6 +205,8 @@ method selfrun($nick is copy, @alias?) {
     use Whateverable::Builds;
     ensure-cloned-repos;
 
+    sleep rand × $CONFIG<join-delay> if none %*ENV<DEBUGGABLE TESTABLE>;
+
     $nick ~= ‘test’ if %*ENV<DEBUGGABLE>;
     .run with IRC::Client.new(
         :$nick
@@ -189,10 +218,10 @@ method selfrun($nick is copy, @alias?) {
         :host(%*ENV<TESTABLE> ?? ‘127.0.0.1’ !! <chat.freenode.net 195.154.200.232>.pick)
         :port(%*ENV<TESTABLE> ?? %*ENV<TESTABLE_PORT> !! 6667)
         :channels(%*ENV<DEBUGGABLE>
-                  ?? ‘#whateverable’
+                  ?? $CONFIG<cave>
                   !! %*ENV<TESTABLE>
                      ?? “#whateverable_$nick”
-                     !! (|<#perl6 #perl6-dev #zofbot #moarvm>, $CONFIG<cave>) )
+                     !! (|$CONFIG<channels>, $CONFIG<cave>) )
         :debug(?%*ENV<DEBUGGABLE>)
         :plugins(self)
         :filters( -> |c { self.filter(|c) } )

@@ -5,6 +5,8 @@ use Test;
 my regex sha    is export { <.xdigit>**7..10 }
 my regex me($t) is export { $($t.our-nick)   }
 
+sub bot-gist-dir($bot) { “/tmp/whateverable/tist/$bot”.IO }
+
 class Testable {
     has $.bot;
     has $.our-nick;
@@ -13,6 +15,7 @@ class Testable {
     has $!server-proc;
     has $!bot-proc;
     has $!irc-client;
+    has $!bridge-client;
     has $.messages;
 
     has $!first-test;
@@ -41,6 +44,7 @@ class Testable {
                                          “--listen=$host”, “--ports=$port”;
         END .kill with $!server-proc;
         %*ENV<TESTABLE_PORT> = $port;
+        %*ENV<TESTABLE_GISTS> = bot-gist-dir $!bot;
         my $started = $!server-proc.start;
         sleep 1;
         if $started.status ~~ Broken {
@@ -67,6 +71,12 @@ class Testable {
             )
         );
         start $!irc-client.run;
+        # The bridge client might be needed later. We don't start it yet.
+        $!bridge-client = IRC::Client.new(
+            :nick<raku-bridge>
+            :host<127.0.0.1> :$port
+            :channels(“#whateverable_{$bot.lc}6”)
+        );
 
         my $executable = ‘./xbin/’ ~ $bot ~ ‘.p6’;
         run :env(|%*ENV, PERL6LIB => ‘lib’), <perl6 -c -->, $executable; # precompahead
@@ -89,17 +99,39 @@ class Testable {
         is $!bot-nick, “{$bot.lc}6”, ‘bot nickname is expected’
     }
 
-    method test(|c ($description, $command, *@expected, :$timeout is copy = 11, :$delay = 0.5)) {
-        $timeout ×= 1.5 if %*ENV<HARNESS_ACTIVE>; # expect some load (relevant for parallelized tests)
-        $!first-test = c without $!first-test;
+    method !start-bridge {
+        my Promise $connected .= new;
+        $!bridge-client.plugins.push: class {
+            method irc-connected (|c) { $connected.keep }
+        }
+        start $!bridge-client.run;
+        await Promise.anyof: $connected, Promise.in(10);
+        ok $connected.status ~~ Kept, ‘bridge client connected’;
+    }
 
-        my $gists-path = “/tmp/whateverable/tist/$!bot-nick”;
+    method test(|c ($description, :$both = True, |rest)) {
+        $!first-test = c without $!first-test;
+        self!do-test($description, |rest);
+        self!do-test($description ~ " (bridged)", :bridge, |rest) if $both;
+    }
+
+    method !do-test(|c ($description, $command, *@expected, :$timeout is copy = 25, :$delay = 0.5, :$bridge = False)) {
+        $timeout ×= 1.5 if %*ENV<HARNESS_ACTIVE>; # expect some load (relevant for parallelized tests)
+
+        my $gists-path = bot-gist-dir $!bot;
         rmtree $gists-path if $gists-path.IO ~~ :d;
 
         my @got;
         my $start = now;
 
-        $!irc-client.send: :where(“#whateverable_$!bot-nick”) :text($command);
+        state $started-bridge = 0;
+        if $bridge {
+            self!start-bridge unless $started-bridge++;
+            $!bridge-client.send: :where(“#whateverable_$!bot-nick”) :text("<$!our-nick> $command");
+        }
+        else {
+            $!irc-client.send: :where(“#whateverable_$!bot-nick”) :text($command);
+        }
         sleep $delay if @expected == 0; # make it possible to check for no replies
         my $lock-delay = 0;
         for ^@expected {
@@ -120,7 +152,7 @@ class Testable {
 
     method test-gist($description, %files) {
         for %files.kv -> $file, $tests {
-            my $path = “/tmp/whateverable/tist/$!bot-nick/$file”;
+            my $path = bot-gist-dir($!bot).add: $file;
             ok $path.IO ~~ :f, “gist file $file exists”;
             cmp-ok slurp($path), &[~~], $_, “gist file {$file}: $description” for @$tests;
         }
@@ -150,69 +182,76 @@ class Testable {
 
         self.test(‘source link’,
                   “$.bot-nick: Source   ”,
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
         self.test(‘source link’,
                   “$.bot-nick:   sourcE?  ”,
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
         self.test(‘source link’,
                   “$.bot-nick:   URl ”,
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
         self.test(‘source link’,
                   “$.bot-nick:  urL?   ”,
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
         self.test(‘source link’,
                   “$.bot-nick: wIki”,
-                  “$.our-nick, https://github.com/perl6/whateverable/wiki/$.bot”);
+                  “$.our-nick, https://github.com/Raku/whateverable/wiki/$.bot”);
 
         self.test(‘source link’,
                   “$.bot-nick:   wiki? ”,
-                  “$.our-nick, https://github.com/perl6/whateverable/wiki/$.bot”);
+                  “$.our-nick, https://github.com/Raku/whateverable/wiki/$.bot”);
 
 
         self.test(‘help message’,
                   “$.bot-nick, helP”,
                   “$.our-nick, $help # See wiki for more examples: ”
-                      ~ “https://github.com/perl6/whateverable/wiki/$.bot”);
+                      ~ “https://github.com/Raku/whateverable/wiki/$.bot”);
 
         self.test(‘help message’,
                   “$.bot-nick,   HElp?  ”,
                   “$.our-nick, $help # See wiki for more examples: ”
-                      ~ “https://github.com/perl6/whateverable/wiki/$.bot”);
-                      
+                      ~ “https://github.com/Raku/whateverable/wiki/$.bot”);
+
         self.test(‘usage message’,
                   “$.bot-nick, usage”,
                   “$.our-nick, $help # See wiki for more examples: ”
-                      ~ “https://github.com/perl6/whateverable/wiki/$.bot”);
+                      ~ “https://github.com/Raku/whateverable/wiki/$.bot”);
 
         self.test(‘usage message’,
                   “$.bot-nick,   usage?  ”,
                   “$.our-nick, $help # See wiki for more examples: ”
-                      ~ “https://github.com/perl6/whateverable/wiki/$.bot”);
-
+                      ~ “https://github.com/Raku/whateverable/wiki/$.bot”);
 
         self.test(‘typoed name’,
                   “z{$.bot-nick.substr: 1}: source”, # mangle it just a little bit
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
         self.test(‘no space after name (semicolon delimiter)’,
                   “{$.bot-nick}:url”,
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
         self.test(‘no space after name (comma delimiter)’,
                   “$.bot-nick,url”,
-                  “$.our-nick, https://github.com/perl6/whateverable”);
+                  “$.our-nick, https://github.com/Raku/whateverable”);
 
+        use Whateverable;
+        self.test(‘thank you (directly)’,
+                  “$.bot-nick: thank you!”,
+                  /^“{$.our-nick}, ”@(you're-welcome)/);
+
+        self.test(‘thank you (indirectly)’,
+                  “thanks, $.bot-nick!”,
+                  /^“{$.our-nick}, ”@(you're-welcome)/);
 
         self.test(‘uptime’,
                   “{$.bot-nick}: uptime”,
                   /^“{$.our-nick}”‘, ’\d+‘ second’s?‘, ’\d+[‘.’\d+]?
                     ‘MiB maxrss. This is Rakudo version ’
                     <[\dabcdefg.-]>+‘ built on MoarVM version ’
-                    <[\dabcdefg.-]>+‘ implementing Perl 6.’\w‘.’$/);
+                    <[\dabcdefg.-]>+‘ implementing ’[Perl|Raku]‘ 6.’\w‘.’$/);
     }
 
     method shortcut-tests(@yes, @no) {
@@ -221,10 +260,10 @@ class Testable {
         for @yes {
             self.test(““$_” shortcut”,
                       “{$_}url”,
-                      “$.our-nick, https://github.com/perl6/whateverable”);
+                      “$.our-nick, https://github.com/Raku/whateverable”);
             self.test(““$_ ” shortcut”,
                       “$_ url”,
-                      “$.our-nick, https://github.com/perl6/whateverable”);
+                      “$.our-nick, https://github.com/Raku/whateverable”);
         }
         for @no {
             self.test(““$_” shortcut does not work”,

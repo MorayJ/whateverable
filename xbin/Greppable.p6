@@ -42,6 +42,8 @@ sub process-grep-line($line, %commits) { # 🙈
     my $backticks = ｢`｣ x (($line.comb(/｢`｣+/) || ｢｣).max.chars + 1);
     my ($path, $line-number, $text) = $line.split: “\x0”, 3;
 
+    return Empty if $path.ends-with: ‘.pdf’; # somehow pdf files are not considered binary
+
     my $start = “perl6-all-modules/$path”; # Not a module, unless…
     if $path ~~ /^ $<source>=[<-[/]>+] ‘/’ $<repo>=[ <-[/]>+ ‘/’ <-[/]>+ ]
                                        ‘/’ $<path>=.* $/ {
@@ -56,7 +58,7 @@ sub process-grep-line($line, %commits) { # 🙈
                 when ‘github’
                    | ‘gitlab’ { Config::INI::parse(slurp $dotgitrepo)<subrepo><commit> }
                 when ‘cpan’   { run(:out, :cwd($ECO-PATH),
-                                    ‘git’, ‘rev-parse’, ‘HEAD’).out.slurp.trim }
+                                    <git rev-parse HEAD>).out.slurp.trim }
                 default       { die “Unsupported source “$source”” }
             }
             %commits{$repo} = $commit;
@@ -73,7 +75,7 @@ sub process-grep-line($line, %commits) { # 🙈
 
         take ~$repo # used for stats in PrettyLink
     }
-    $text = shorten $text, 300; # do not print too long lines
+    $text = shorten $text || ‘’, 300; # do not print too long lines
     $text = markdown-escape $text;
     $text ~~ s:g/ “\c[ESC][1;31m” (.*?) [ “\c[ESC][m” | $ ] /<b>{$0}<\/b>/; # TODO get rid of \/ ?
 
@@ -83,7 +85,7 @@ sub process-grep-line($line, %commits) { # 🙈
 multi method irc-to-me($msg where .args[1].starts-with(‘file’ | ‘tree’) &&
                                   /^ \s* [ || ‘/’ $<regex>=[.*] ‘/’
                                            || $<regex>=[.*?]       ] \s* $/) {
-    my $result = run :out, :cwd($ECO-PATH), ‘git’, ‘ls-files’, ‘-z’;
+    my $result = run :out, :cwd($ECO-PATH), <git ls-files -z>;
     my $out = perl6-grep $result.out, $<regex>;
     my $gist = $out.map({ process-ls-line $_ }).join(“\n”);
     return ‘Found nothing!’ unless $gist;
@@ -91,10 +93,10 @@ multi method irc-to-me($msg where .args[1].starts-with(‘file’ | ‘tree’) 
 }
 
 multi method irc-to-me($msg) {
-    my @cmd = ‘git’, ‘grep’, ‘--color=always’, ‘-z’, ‘-I’,
-              ‘--perl-regexp’, ‘--line-number’, ‘--’, $msg;
+    my @cmd = |<git grep --color=always -z -I
+              --perl-regexp --line-number -->, $msg;
 
-    run :out(Nil), :cwd($ECO-PATH), ‘git’, ‘pull’;
+    run :out(Nil), :cwd($ECO-PATH), <git pull>;
     my $result = get-output :cwd($ECO-PATH), |@cmd;
 
     grumble ‘Sorry, can't do that’ if $result<exit-code> ≠ 0 | 1 or $result<signal> ≠ 0;
@@ -103,7 +105,9 @@ multi method irc-to-me($msg) {
     my %commits = ();
     my $gist = “| File | Code |\n|--|--|\n”;
     my $stats = gather {
-        $gist ~= $result<output>.split(“\n”).map({process-grep-line $_, %commits}).join: “\n”;
+        $gist ~= $result<output>.split(/“\n”|“\r\n”/).map({process-grep-line $_, %commits}).join: “\n”;
+        # 🙈 after touching the .split part three times, I think this should work…
+        # 🙈 it will eat \r but that's not too bad
     }
     my $total   = $stats.elems;
     my $modules = $stats.Set.elems;
@@ -113,11 +117,8 @@ multi method irc-to-me($msg) {
 
 
 if $ECO-PATH.IO !~~ :d {
-    run ‘git’, ‘clone’, $ECO-ORIGIN, $ECO-PATH
+    run <git clone>, $ECO-ORIGIN, $ECO-PATH
 }
-
-
-my %*BOT-ENV;
 
 Greppable.new.selfrun: ‘greppable6’, [ / [file|tree]? grep6? <before ‘:’> /,
                                        fuzzy-nick(‘greppable6’, 2) ]

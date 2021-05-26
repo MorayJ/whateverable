@@ -28,16 +28,16 @@ unit module Whateverable::Builds;
 #↓ Clones Rakudo and Moar repos and ensures some directory structure.
 sub ensure-cloned-repos is export {
     # TODO racing (calling this too often when nothing is cloned yet)
-    if $CONFIG<repo-current-rakudo-moar>.IO !~~ :d  {
-        run <git clone -->, $CONFIG<repo-origin-rakudo>,
-                            $CONFIG<repo-current-rakudo-moar>;
+    with $CONFIG<repo-current-rakudo-moar> {
+        run <git clone -->, $CONFIG<repo-origin-rakudo>, $_ if not .IO.d
     }
-    if $CONFIG<repo-current-moarvm>     .IO !~~ :d  {
-        run <git clone -->, $CONFIG<repo-origin-moarvm>,
-                            $CONFIG<repo-current-moarvm>;
+    with $CONFIG<repo-current-moarvm> {
+        run <git clone -->, $CONFIG<repo-origin-moarvm>, $_ if not .IO.d;
     }
-    mkdir “$CONFIG<archives-location>/rakudo-moar”;
-    mkdir “$CONFIG<archives-location>/moarvm”;
+    with $CONFIG<archives-location> {
+        mkdir “$_/rakudo-moar”;
+        mkdir “$_/moarvm”;
+    }
     True
 }
 
@@ -46,8 +46,8 @@ sub ensure-cloned-repos is export {
 #↓ doing anything.
 sub pull-cloned-repos is export {
     ensure-cloned-repos;
-    run :cwd($CONFIG<repo-current-rakudo-moar>), <git pull>;
-    run :cwd($CONFIG<repo-current-moarvm     >), <git pull>;
+    run :cwd($_), <git pull> with $CONFIG<repo-current-rakudo-moar>;
+    run :cwd($_), <git pull> with $CONFIG<repo-current-moarvm>;
     True
 }
 
@@ -58,19 +58,24 @@ sub get-short-commit($original-commit) is export { # TODO proper solution please
     !! $original-commit
 }
 
-
-#↓ Turns anything into a full SHA (returns Nil if can't).
-sub to-full-commit($commit, :$short=False, :$repo=$CONFIG<rakudo>) is export {
+sub anything-to-sha($commit, :$short=False, :$repo=$CONFIG<rakudo>) {
     return if run(:out(Nil), :err(Nil), :cwd($repo),
                   <git rev-parse --verify>, $commit).exitcode ≠ 0; # make sure that $commit is valid
 
     my $result = get-output cwd => $repo,
-                            |(|<git rev-list -1>, # use rev-list to handle tags
+                            |(|<git rev-list -1>, # use rev-list to handle tags and abbrevs
                               ($short ?? ‘--abbrev-commit’ !! Empty), $commit);
 
     return if     $result<exit-code> ≠ 0;
     return unless $result<output>;
     $result<output>
+}
+
+#| Turns anything into a full SHA (returns Nil if can't).
+sub to-full-commit($commit, :$short=False, :$repo=$CONFIG<rakudo>) is export {
+    anything-to-sha(        $commit , :$short, :$repo)
+    ||
+    anything-to-sha(“origin/$commit”, :$short, :$repo)
 }
 
 #↓ Pulls an archive with rakudo build from mothership (Whateverable
@@ -104,7 +109,7 @@ sub fetch-build($full-commit-hash, :$backend!) is export {
 
     my $location = $CONFIG<archives-location>.IO.add: $backend;
     my $archive  = $location.add: ~$0;
-    spurt $archive, $response.content, :bin;
+    spurt $archive, $response.content;
 
     if $archive.ends-with: ‘.lrz’ { # populate symlinks
         my $proc = run :out, :bin, <lrzip -dqo - -->, $archive;
@@ -175,7 +180,7 @@ sub get-commits($_, :$repo=$CONFIG<rakudo>) is export {
         }
         return @commits
     }
-    return get-tags ‘2015-12-24’, :$repo if /:i ^ [ releases | v? 6 ‘.’? c ] $/;
+    return get-tags ‘2015-12-20’, :$repo if /:i ^ [ releases | v? 6 ‘.’? c ] $/;
     return get-tags ‘2014-01-01’, :$repo if /:i ^   all                      $/;
     return ~$<commit>                    if /:i ^   compare \s $<commit>=\S+ $/;
     return $_
@@ -188,28 +193,26 @@ sub get-similar($tag-or-hash, @other?, :$repo=$CONFIG<rakudo>) is export {
                           ‘--format=%(*objectname)/%(objectname)/%(refname:strip=2)’,
                           ‘--sort=-taggerdate’)<output>.lines
                           .map(*.split(‘/’))
-                          .grep({ build-exists .[0] || .[1],
+                          .grep({ build-exists .[0] || .[1], # no thinko here, .[0] will be empty sometimes
                                                :force-local })
                           .map(*[2]);
 
+    my @branches = get-output(cwd => $repo, <git branch --remotes>,
+                              ‘--format=%(objectname)/%(refname:strip=3)’,
+                              ‘--sort=-authordate’)<output>.lines
+                              .map(*.split(‘/’))
+                              .grep({ build-exists .[0],
+                                                   :force-local })
+                              .map(*[1]);
+
     my $cutoff = $tag-or-hash.chars max 7;
-    my @commits = get-output(cwd => $repo, ‘git’, ‘rev-list’,
-                             ‘--all’, ‘--since=2014-01-01’)<output>
+    my @commits = get-output(cwd => $repo, <git rev-list --all>,
+                             ‘--since=2014-01-01’)<output>
                       .lines.map(*.substr: 0, $cutoff);
 
     # flat(@options, @tags, @commits).min: { sift4($_, $tag-or-hash, 5, 8) }
-    my $ans = ‘HEAD’;
-    my $ans_min = ∞;
-
-    use Text::Diff::Sift4;
-    for flat @options, @tags, @commits {
-        my $dist = sift4 $_, $tag-or-hash, $cutoff;
-        if $dist < $ans_min {
-            $ans = $_;
-            $ans_min = $dist;
-        }
-    }
-    $ans
+    did-you-mean $tag-or-hash, flat(@options, @tags, @branches, @commits),
+                 :default(‘HEAD’), :max-offset($cutoff);
 }
 
 # vim: expandtab shiftwidth=4 ft=perl6

@@ -50,11 +50,11 @@ sub condense(@arr) { # squish into ranges
     }
 }
 
-method process($msg, $config is copy, $grep is copy, $code) {
+method process($msg, $config is copy, $grep, $code is copy) {
     my $start-time = now;
 
     if $config ~~ /^ [say|sub] $/ {
-        $msg.reply: “Seems like you forgot to specify a revision (will use “HEAD” instead of “$config”)”;
+        reply $msg, “Seems like you forgot to specify a revision (will use “HEAD” instead of “$config”)”;
         $code = “$config $code”;
         $config = ‘HEAD’
     }
@@ -105,8 +105,7 @@ method process($msg, $config is copy, $grep is copy, $code) {
         grumble “«hit the total time limit of {TOTAL-TIME} seconds»”
     }
 
-    my $short-str = “¦$short-commit: «$output»”; # TODO no need for short string (we gist it anyway)
-    my $long-str  = “¦$full-commit: «$output»”; # TODO simpler output perhaps?
+    my $result-str  = “¦$full-commit: «$output»”; # TODO simpler output perhaps?
 
     my %coverage;
     for $result<coverage>.split(“\n”) -> $line {
@@ -138,12 +137,9 @@ method process($msg, $config is copy, $grep is copy, $code) {
         }
     }
 
-    # TODO no need for $short-str as mentioned earlier
-    ($short-str but ProperStr($long-str)) but FileStore(%(‘result.md’ => $cover-report));
+    (‘’ but ProperStr($result-str)) but FileStore(%(‘result.md’ => $cover-report));
 }
 
-
-my %*BOT-ENV;
 
 Coverable.new.selfrun: ‘coverable6’, [ / cover6? <before ‘:’> /,
                                        fuzzy-nick(‘coverable6’, 3) ];

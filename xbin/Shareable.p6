@@ -53,7 +53,7 @@ sub cached-archive($build where ‘HEAD.tar.gz’, :$backend=‘rakudo-moar’, 
 }
 
 my $application = route {
-    get sub () { redirect :temporary, ‘https://github.com/perl6/whateverable’ }
+    get sub () { redirect :temporary, ‘https://github.com/Raku/whateverable’ }
     get sub ($build, :$type=‘rakudo-moar’, :$arch) {
         return not-found if $arch and $arch ne $host-arch;
         my $backend = $type; # “backend” is used internally but sounds weird
@@ -69,6 +69,13 @@ my $application = route {
         my $archive-link  = “$CONFIG<archives-location>/$backend/$full-commit”;
 
         my $file = $archive-path.IO.e ?? $archive-path !! $archive-link.IO.resolve.Str;
+
+        # Expose full commit sha in headers.
+        # This header will never be standardized, so I'm
+        # including the X- prefix.
+        # https://stackoverflow.com/questions/3561381/custom-http-headers-naming-conventions
+        header ‘X-Full-Commit’, $full-commit;
+
         header ‘Content-Disposition’, “attachment; filename="{$file.IO.basename}"”;
         static $file
     }
@@ -88,12 +95,10 @@ method help($msg) {
 multi method irc-to-me($msg where /^ $<build>=[\S+] $/) {
     my $full-commit = to-full-commit ~$<build>;
     return ‘No build for this commit’ unless build-exists $full-commit;
-    my $link = $CONFIG<mothership> // $*CONFIG<self>;
+    my $link = $CONFIG<mothership> // $CONFIG<self>;
     “$link/$<build>”
 }
 
-
-my %*BOT-ENV;
 
 Shareable.new.selfrun: ‘shareable6’, [ fuzzy-nick(‘shareable6’, 2) ]
 

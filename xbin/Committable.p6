@@ -27,7 +27,7 @@ use IRC::Client;
 
 unit class Committable does Whateverable;
 
-constant TOTAL-TIME = 60 × 3;
+constant TOTAL-TIME = 60 × 10;
 constant shortcuts = %(
     mc  => ‘2015.12’,      ec  => ‘2015.12’,
     mch => ‘2015.12,HEAD’, ech => ‘2015.12,HEAD’,
@@ -48,7 +48,9 @@ method help($msg) {
 multi method irc-to-me($msg where .args[1] ~~ ?(my $prefix = m/^ $<shortcut>=@(shortcuts.keys)
                                                                  [‘:’ | ‘,’]/)
                                   && .text ~~ /^ \s* $<code>=.+ /) is default {
-    self.process: $msg, shortcuts{$prefix<shortcut>}, ~$<code>
+    my $code     = ~$<code>;
+    my $shortcut = shortcuts{$prefix<shortcut>};
+    start process $msg, $shortcut, $code
 }
 
 multi method irc-to-me($msg where /^ \s* [ @<envs>=((<[\w-]>+)‘=’(\S*)) ]* %% \s+
@@ -60,27 +62,16 @@ multi method irc-to-me($msg where /^ \s* [ @<envs>=((<[\w-]>+)‘=’(\S*)) ]* %
         grumble “ENV variable {.key} can only be 0, 1 or empty” if .value ne ‘0’ | ‘1’ | ‘’;
     }
     %ENV ,= %*ENV;
-    self.process: $msg, ~$<config>, ~$<code>, :%ENV
+    my $config = ~$<config>;
+    my $code   = ~$<code>;
+    start process $msg, $config, $code, :%ENV
+
 }
 
-method process-commit($commit, $filename, :%ENV) {
-    # convert to real ids so we can look up the builds
-    my $full-commit = to-full-commit    $commit;
-    my $short-commit = get-short-commit $commit;
-    $short-commit ~= “({get-short-commit $full-commit})” if $commit eq ‘HEAD’;
-
-    without $full-commit {
-        return $short-commit R=> ‘Cannot find this revision (did you mean “’ ~
-          get-short-commit(get-similar $commit, <HEAD v6.c releases all>) ~
-          ‘”?)’
-    }
-    $short-commit R=> subprocess-commit $commit, $filename, $full-commit, :%ENV;
-}
-
-method process($msg, $config is copy, $code is copy, :%ENV) {
+sub process($msg, $config is copy, $code is copy, :%ENV) {
     my $start-time = now;
     if $config ~~ /^ [say|sub] $/ {
-        $msg.reply: “Seems like you forgot to specify a revision (will use “v6.c” instead of “$config”)”;
+        reply $msg, “Seems like you forgot to specify a revision (will use “v6.c” instead of “$config”)”;
         $code = “$config $code”;
         $config = ‘v6.c’
     }
@@ -90,32 +81,15 @@ method process($msg, $config is copy, $code is copy, :%ENV) {
 
     my @outputs; # unlike %shas this is ordered
     my %shas;    # { output => [sha, sha, …], … }
-    %shas.categorize-list: as => *.value, {
-        if now - $start-time > TOTAL-TIME { # bail out if needed
-            grumble “«hit the total time limit of {TOTAL-TIME} seconds»”
-        }
-        @outputs.push: .key if %shas{.key}:!exists;
-        .key
-    }, @commits.map: { self.process-commit: $_, $file, :%ENV };
 
-    my $short-str = @outputs == 1 && %shas{@outputs[0]} > 3 && $config.chars < 20
-    ?? “¦{$config} ({+%shas{@outputs[0]}} commits): «{@outputs[0]}»”
-    !! ‘¦’ ~ @outputs.map({ “{%shas{$_}.join: ‘,’}: «$_»” }).join: ‘ ¦’;
+    proccess-and-group-commits @outputs, %shas, $file, @commits,
+                               :intermingle, :!prepend,
+                               :$start-time, time-limit => TOTAL-TIME,
+                               :%ENV;
 
-    my &limited-join = sub (@sha-list) {
-        my $l = ‘’;
-        gather for @sha-list -> $sha {
-            { take “$l,”; $l = ‘’ } if $l and ($l ~ $sha).chars > 70;
-            $l ~= $l ?? “,$sha” !! $sha;
-            LAST take $l
-        }.join: “\n  ”
-    }
-    my $long-str  = ‘¦’ ~ @outputs.map({ “«{limited-join %shas{$_}}»:\n$_” }).join: “\n¦”;
-    $short-str but ProperStr($long-str);
+    commit-groups-to-gisted-reply @outputs, %shas, $config;
 }
 
-
-my %*BOT-ENV;
 
 Committable.new.selfrun: ‘committable6’, [ / [ | c <!before [｢:\｣|｢:/｣]> [ommit]?6?
                                                | @(shortcuts.keys) ] <before ‘:’> /,

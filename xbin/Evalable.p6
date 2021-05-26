@@ -21,22 +21,26 @@ use Whateverable;
 use Whateverable::Bits;
 use Whateverable::Builds;
 use Whateverable::Config;
+use Whateverable::Discordable;
 use Whateverable::Processing;
-use Whateverable::Replaceable;
 use Whateverable::Running;
+use Whateverable::Userlist;
 
 use IRC::Client;
 use Terminal::ANSIColor;
 
-unit class Evalable does Whateverable does Whateverable::Replaceable;
+unit class Evalable does Whateverable does Whateverable::Userlist;
 
 method help($msg) {
     “Like this: {$msg.server.current-nick}: say ‘hello’; say ‘world’”
 }
 
 multi method irc-to-me($msg) {
-    return self.process: $msg, $msg.text if $msg.args[1] !~~
-                                /^ \s*[master|rakudo|r|‘r-m’|m|p6|perl6]‘:’\s /;
+    # Do not answer when camelia is around (she reacts to the same triggers).
+    # But always do when the message is from discord because camelia doesn't
+    # support that.
+    return self.process: $msg, $msg.text if $msg.nick ~~ FromDiscord or
+            $msg.args[1] !~~ /^ \s*[master|rakudo|r|‘r-m’|m|p6|perl6]‘:’\s /;
     self.make-believe: $msg, (‘camelia’,), {
         self.process: $msg, $msg.text
     }
@@ -47,6 +51,8 @@ multi method irc-privmsg-channel($msg) {
     my $nonword-ratio = $msg.args[1].comb(/<-alpha -space>/) ÷ $msg.args[1].chars;
     nextsame if $nonword-ratio < 0.1; # skip if doesn't look like code at all
     nextsame if $msg.args[1] ~~ /^ \s*<[\w-]>+‘:’ /; # skip messages to other bots
+    nextsame if $msg.args[1] eq ‘???’;                 # unfortunate trigger (???)
+    nextsame if $msg.args[1] ~~ /^ \w+ \s+ ‘&’ \s* $/; # unfortunate trigger (sleep &)
 
     self.process: $msg, $msg.args[1], :good-only
 }
@@ -93,22 +99,22 @@ method process($msg, $code, :$good-only?) {
     $reply-end = ‘…’ ~ $reply-end;
     my $extra-size = ($reply-start, $reply-end).map(*.encode.elems).sum;
     my $output-size = 0;
-    my $SHORT-MESSAGE-LIMIT = $CONFIG<message-limit> ÷ 2;
+    my $SHORT-MESSAGE-LIMIT = $CONFIG<message-limit> × ⅓;
     my $output-cut = $output.comb.grep({
         $output-size += .encode.elems;
         $output-size + $extra-size < $SHORT-MESSAGE-LIMIT
     })[0..*-2].join;
-    $msg.reply: $reply-start ~ $output-cut ~ $reply-end;
+    reply $msg, $reply-start ~ $output-cut ~ $reply-end;
     sleep 0.02;
     my $gist = ($extra ?? “$extra\n” !! ‘’) ~ colorstrip $output;
     (‘’ but ProperStr($gist)) but PrettyLink({ “Full output: $_” })
 }
 
 
-my %*BOT-ENV = commit => ‘HEAD’;
+%*BOT-ENV<commit> = ‘HEAD’;
 
-Evalable.new.selfrun: ‘evalable6’, [/ [ | \s*[master|rakudo|r|‘r-m’|m|p6|perl6]
+Evalable.new.selfrun: ‘evalable6’, [/ [ | \s*[master|rakudo|‘r-m’|m|p6|perl6|raku]
                                         | e[val]?6? | what ] <before ‘:’> /,
-                                    fuzzy-nick(‘evalable6’, 2) ]
+                                    fuzzy-nick(‘evalable6’, 1) ]
 
 # vim: expandtab shiftwidth=4 ft=perl6

@@ -11,7 +11,7 @@ my $t = Testable.new: bot => ‘Evalable’;
 
 $t.common-tests: help => “Like this: {$t.bot-nick}: say ‘hello’; say ‘world’”;
 
-$t.shortcut-tests: <e: e6: eval: eval6:>,
+$t.shortcut-tests: <e: e6: eval: eval6: raku:>,
                    <e e, e6 e6, eval eval, eval6 eval6, what:>;# what what,>;
 
 # Basics
@@ -121,6 +121,10 @@ $t.test(‘␤ works like an actual newline’,
         /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «hello world!␤»’ $/);
 }
 
+$t.test(‘special characters (\r\n)’,
+        ‘e: say “\r\n”’,
+        /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «␍␤␤»’ $/);
+
 # URLs
 
 $t.test(‘fetching code from urls’,
@@ -148,15 +152,29 @@ $t.test(‘wrong mime type’,
 
 $t.test(‘malformed link (failed to resolve)’,
         ‘eval: https://perl6.or’,
-        /^ <me($t)>‘, It looks like a URL, but for some reason I cannot download it (Failed to resolve host name 'perl6.or' with family ’\w+‘. Error: 'Name or service not known')’ $/);
+        /^ <me($t)>‘, It looks like a URL, but for some reason I cannot download it (Failed to resolve host name 'perl6.or' with family ’\w+‘.␤Error: ’\'?‘Name or service not known’\'?‘)’ $/);
 
 $t.test(‘malformed link (could not parse)’,
         ‘eval: https://:P’,
         “{$t.our-nick}, It looks like a URL, but for some reason I cannot download it (Could not parse URI: https://:P)”);
 
+# markdown gists
+
+$t.test(‘perl6 code block in a markdown file’,
+        ‘e: https://gist.github.com/AlexDaniel/06a5d19e13264b14a585e7c5990d4680’,
+        /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «43␤43␤»’ $/);
+
+$t.test(‘unknown code block in a markdown file’,
+        ‘e: https://gist.github.com/AlexDaniel/227d3eeb65ec5bb1b06dd59b85c7ebbd’,
+        /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «42␤42␤»’ $/);
+
+$t.test(‘multiple code blocks in a markdown file’,
+        ‘e: https://gist.github.com/AlexDaniel/c5c1aa0fdcee3fd1f74cbb099d0f9b19’,
+        /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «41␤41␤»’ $/);
+
 # Camelia replacement
 
-my @alts = <master rakudo r r-m m p6 perl6>;
+my @alts = <master rakudo r-m m p6 perl6>;
 
 for (‘’, ‘ ’) X~ (@alts X~ ‘: ’, ‘:’) {
     $t.test(“answers on ‘$_’ when camelia is not around”,
@@ -171,8 +189,11 @@ start $camelia.run;
 sleep 1;
 
 for (‘’, ‘ ’) X~ (@alts X~ ‘: ’) {
-    $t.test(“camelia is back, be silent (‘$_’)”,
-            $_ ~ “say ‘$_’”)
+    $t.test(:!both, “camelia is back, be silent (‘$_’)”,
+            $_ ~ “say ‘$_’”);
+    $t.test(:!both, :bridge, “camelia is back, be NOT silent for discord (‘$_’)”,
+            $_ ~ “say ‘$_’”,
+            /^ <me($t)>‘, rakudo-moar ’<sha>“: OUTPUT: «$_␤»” $/)
 }
 
 for (‘’, ‘ ’) X~ (@alts X~ ‘:’) {
@@ -228,9 +249,15 @@ $t.test(‘segfaults are not ignored’,
         ‘use NativeCall; sub strdup(int64) is native(Str) {*}; strdup(0)’,
         /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «(signal SIGSEGV) »’ $/);
 
+$t.test(‘ignore common messages (sleep &)’,
+        ‘sleep &’);
+
+$t.test(‘ignore common messages (???)’,
+        ‘???’);
+
 # Timeouts
 
-$t.test(‘timeout’,
+$t.test(:!both, ‘timeout’,
         ‘eval: say ‘Zzzz…’; sleep ∞’,
         /^ <me($t)>‘, rakudo-moar ’<sha>‘: OUTPUT: «(signal SIGHUP) Zzzz…␤«timed out after 10 seconds»»’ $/);
 

@@ -20,7 +20,7 @@ $t.shortcut-tests: <c: c6: commit: commit6:
 
 $t.test(‘fallback’,
         “{$t.bot-nick}: wazzup?”,
-        “{$t.our-nick}, I cannot recognize this command. See wiki for some examples: https://github.com/perl6/whateverable/wiki/Committable”);
+        “{$t.our-nick}, I cannot recognize this command. See wiki for some examples: https://github.com/Raku/whateverable/wiki/Committable”);
 
 # Basics
 
@@ -128,24 +128,24 @@ $t.test(‘huge stdin is not replied back fully’,
 # Ranges and multiple commits
 
 $t.test(‘“releases” query’,
-        ‘commit: releases say $*PERL’,
-        /^ $($t.our-nick) ‘, ¦releases (’\d+‘ commits): «Perl 6 (6.c)␤»’ $/,
-        :20timeout);
+        ‘commit: releases say $*VM.name’,
+        /^ $($t.our-nick) ‘, ¦releases (’\d+‘ commits): «moar␤»’ $/,
+        :50timeout);
 
 $t.test(‘“v6c” query’,
-        ‘commit: v6c say $*PERL’,
-        /^ $($t.our-nick) ‘, ¦v6c (’\d+‘ commits): «Perl 6 (6.c)␤»’ $/,
-        :20timeout);
+        ‘commit: v6c say $*VM.name’,
+        /^ $($t.our-nick) ‘, ¦v6c (’\d+‘ commits): «moar␤»’ $/,
+        :30timeout);
 
 $t.test(‘“6.c” query’,
-        ‘commit: 6.c say $*PERL’,
-        /^ $($t.our-nick) ‘, ¦6.c (’\d+‘ commits): «Perl 6 (6.c)␤»’ $/,
-        :20timeout);
+        ‘commit: 6.c say $*VM.name’,
+        /^ $($t.our-nick) ‘, ¦6.c (’\d+‘ commits): «moar␤»’ $/,
+        :30timeout);
 
 $t.test(‘“6c” query’,
-        ‘commit: 6c say $*PERL’,
-        /^ $($t.our-nick) ‘, ¦6c (’\d+‘ commits): «Perl 6 (6.c)␤»’ $/,
-        :20timeout);
+        ‘commit: 6c say $*VM.name’,
+        /^ $($t.our-nick) ‘, ¦6c (’\d+‘ commits): «moar␤»’ $/,
+        :30timeout);
 
 $t.test(‘“6c,” does not work’,
         ‘6c, say ‘6c, is actually working…’’);
@@ -153,12 +153,12 @@ $t.test(‘“6c,” does not work’,
 $t.test(‘“all” query (same output everywhere)’,
         ‘commit: all say 'hi'’, # ASCII quotes because they are supported everywhere
         /^ $($t.our-nick) ‘, ¦all (’\d+‘ commits): «hi␤»’ $/,
-        :30timeout);
+        :50timeout);
 
 $t.test(‘“all” query (different output everywhere)’,
         ‘commit: all say rand’,
         “{$t.our-nick}, https://whatever.able/fakeupload”,
-        :30timeout);
+        :50timeout);
 
 $t.test(‘multiple commits separated by comma’,
         “commit: 2016.02,2016.03,9ccd848,HEAD say ‘hello’”,
@@ -179,6 +179,10 @@ $t.test(‘commit..commit range syntax’,
 $t.test(‘very old tags’,
         ‘commit: 2014.01,2014.02,2014.03 say 42’,
         “{$t.our-nick}, ¦2014.01,2014.02,2014.03: «42␤»”);
+
+$t.test(‘branches’,
+        ‘c: nom say $*PERL.compiler.version’,
+        “{$t.our-nick}, ¦nom: «v2017.10.4.g.4.fca.94743␤»”);
 
 # Special characters
 #`{ What should we do with colors?
@@ -218,11 +222,25 @@ $t.test(‘wrong mime type’,
 
 $t.test(‘malformed link (failed to resolve)’,
         ‘commit: HEAD https://perl6.or’,
-        /^ <me($t)>‘, It looks like a URL, but for some reason I cannot download it (Failed to resolve host name 'perl6.or' with family ’\w+‘. Error: 'Name or service not known')’ $/);
+        /^ <me($t)>‘, It looks like a URL, but for some reason I cannot download it (Failed to resolve host name 'perl6.or' with family ’\w+‘.␤Error: ’\'?‘Name or service not known’\'?‘)’ $/);
 
 $t.test(‘malformed link (could not parse)’,
         ‘commit: HEAD https://:P’,
         “{$t.our-nick}, It looks like a URL, but for some reason I cannot download it (Could not parse URI: https://:P)”);
+
+# markdown gists
+
+$t.test(‘perl6 code block in a markdown file’,
+        ‘c: 2015.12 https://gist.github.com/AlexDaniel/06a5d19e13264b14a585e7c5990d4680’,
+        “{$t.our-nick}, ¦2015.12: «43␤43␤»”);
+
+$t.test(‘unknown code block in a markdown file’,
+        ‘c: 2015.12 https://gist.github.com/AlexDaniel/227d3eeb65ec5bb1b06dd59b85c7ebbd’,
+        “{$t.our-nick}, ¦2015.12: «42␤42␤»”);
+
+$t.test(‘multiple code blocks in a markdown file’,
+        ‘c: 2015.12 https://gist.github.com/AlexDaniel/c5c1aa0fdcee3fd1f74cbb099d0f9b19’,
+        “{$t.our-nick}, ¦2015.12: «41␤41␤»”);
 
 # Did you mean … ?
 
@@ -242,14 +260,18 @@ $t.test(‘Only one commit is wrong (did you mean … ?)’,
         ‘commit: 2015.13,2015.12^ say 42’,
         “{$t.our-nick}, ¦2015.13: «Cannot find this revision (did you mean “2015.12”?)» ¦2015.12^: «42␤»”);
 $t.test(‘Both commits are wrong (did you mean … ?)’,
-        ‘commit: 2015.12^,2015.13,69fecb52eb2 say 42’,
-        “{$t.our-nick}, ¦2015.12^: «42␤» ¦2015.13: «Cannot find this revision (did you mean “2015.12”?)» ¦69fecb5: «Cannot find this revision (did you mean “c9ebfc2”?)»”);
+        ‘commit: 2015.12^,2015.13,d2c5694e50 say 42’,
+        “{$t.our-nick}, ¦2015.12^: «42␤» ¦2015.13: «Cannot find this revision (did you mean “2015.12”?)» ¦d2c5694: «Cannot find this revision (did you mean “d2c5684”?)»”);
+
+$t.test(‘Did you mean a branch?’,
+        ‘commit: venom say 42’,
+        “{$t.our-nick}, ¦venom: «Cannot find this revision (did you mean “nom”?)»”);
 
 $t.test(‘Did you forget to specify a revision?’,
         ‘commit: say ‘hello world’’,
         “{$t.our-nick}, Seems like you forgot to specify a revision (will use “v6.c” instead of “say”)”,
         /^ $($t.our-nick) ‘, ¦v6.c (’\d+‘ commits): «hello world␤»’ $/,
-        :20timeout);
+        :30timeout);
 
 # Gists
 
@@ -265,7 +287,7 @@ $t.test-gist(‘wrapped lines on long commit lists’,
 
 # Timeouts
 
-$t.test(:22timeout, ‘timeout’,
+$t.test(:!both, :22timeout, ‘timeout’,
         ‘commit: 2015.12,HEAD say ‘Zzzz…’; sleep ∞’,
         /^ <me($t)>‘, ¦2015.12,HEAD(’<sha>‘): «Zzzz…␤«timed out after 10 seconds» «exit signal = SIGHUP (1)»»’ $/);
 

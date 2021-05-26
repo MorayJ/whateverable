@@ -37,6 +37,10 @@ my \EVERYTHING-RANGE  = ‘2014.01^..HEAD’; # to build everything, but in hist
 
 my \WORKING-DIRECTORY = ‘.’; # TODO not supported yet
 
+my \RAKUDO-NQP-ORIGIN = ‘https://github.com/perl6/nqp.git’;
+my \RAKUDO-NQP-LATEST = “/tmp/whateverable/rakudo-triple-nqp-repo”;
+my \RAKUDO-MOAR-ORIGIN = ‘https://github.com/MoarVM/MoarVM.git’;
+my \RAKUDO-MOAR-LATEST = “/tmp/whateverable/rakudo-triple-moar-repo”;
 my \REPO-ORIGIN       = RAKUDOISH
                         ?? ‘https://github.com/rakudo/rakudo.git’
                         !! ‘https://github.com/MoarVM/MoarVM.git’;
@@ -56,39 +60,87 @@ mkdir BUILDS-LOCATION;
 mkdir ARCHIVES-LOCATION;
 
 # TODO IO::Handle.lock ? run ‘flock’? P5 modules?
-exit 0 unless run ‘mkdir’, :err(Nil), ‘--’, BUILD-LOCK; # only one instance running
+exit 0 unless run :err(Nil), <mkdir -->, BUILD-LOCK; # only one instance running
 my $locked = True;
 END BUILD-LOCK.IO.rmdir if $locked;
 
-if REPO-LATEST.IO ~~ :d  {
-    my $old-dir = $*CWD;
-    LEAVE chdir $old-dir;
-    chdir REPO-LATEST;
-    run ‘git’, ‘pull’;
-} else {
-    exit unless run ‘git’, ‘clone’, ‘--’, REPO-ORIGIN, REPO-LATEST;
+sub pull-or-clone($repo-origin, $repo-path) {
+    if $repo-path.IO ~~ :d  {
+        my $old-dir = $*CWD;
+        run :cwd($repo-path), <git pull>;
+    } else {
+        exit unless run <git clone -->, $repo-origin, $repo-path;
+    }
+}
+
+pull-or-clone REPO-ORIGIN, REPO-LATEST;
+if RAKUDOISH {
+    pull-or-clone RAKUDO-NQP-ORIGIN,  RAKUDO-NQP-LATEST;
+    pull-or-clone RAKUDO-MOAR-ORIGIN, RAKUDO-MOAR-LATEST;
 }
 
 if REPO-CURRENT.IO !~~ :d  {
-    run ‘git’, ‘clone’, ‘--’, REPO-LATEST, REPO-CURRENT;
+    run <git clone --origin local-origin -->, REPO-LATEST, REPO-CURRENT;
+    # make sure we can still pull branch info and other stuff from the actual origin
+    run :cwd(REPO-CURRENT), <git remote add origin>, REPO-ORIGIN;
 }
 
 my $channel = Channel.new;
 
-my @git-latest  = ‘git’, ‘--git-dir’, “{REPO-LATEST}/.git”, ‘--work-tree’, REPO-LATEST;
-my @args-tags   = |@git-latest, ‘log’, ‘-z’, ‘--pretty=%H’, ‘--tags’, ‘--no-walk’, ‘--since’, TAGS-SINCE;
-my @args-latest = |@git-latest, ‘log’, ‘-z’, ‘--pretty=%H’, COMMIT-RANGE;
-my @args-recent = |@git-latest, ‘log’, ‘-z’, ‘--pretty=%H’, ‘--all’, ‘--since’, ALL-SINCE;
-my @args-old    = |@git-latest, ‘log’, ‘-z’, ‘--pretty=%H’, ‘--reverse’, EVERYTHING-RANGE;
+my @git-log     = <git log -z --pretty=%H>;
+my @args-tags   = |@git-log, |<--tags --no-walk --since>, TAGS-SINCE;
+my @args-latest = |@git-log, COMMIT-RANGE;
+my @args-recent = |@git-log, |<--all --since>, ALL-SINCE;
+my @args-old    = |@git-log, ‘--reverse’, EVERYTHING-RANGE;
 
 my %commits;
+
+# Normal Rakudo commits
 for @args-tags, @args-latest, @args-recent, @args-old -> @_ {
-    for run(:out, |@_).out.split(0.chr, :skip-empty) {
+    for run(:cwd(REPO-LATEST), :out, |@_).out.split(0.chr, :skip-empty) {
         next if %commits{$_}:exists;
         %commits{$_}++;
         $channel.send: $_
     }
 }
+
+sub get-build-revision($repo, $on-commit, $file) {
+    run(:cwd($repo), :out, ‘git’, ‘show’,
+        “{$on-commit}:tools/build/$file”).out.slurp-rest.trim
+}
+
+# Rakudo-NQP-Moar triples (for bumps)
+#`｢｢｢
+if PROJECT == Rakudo-Moar {
+    my @args-bumps = ‘git’, ‘log’, ‘-z’, ‘--pretty=%x00%H’,
+                     ‘--follow’, ‘--reverse’,
+                     EVERYTHING-RANGE, ‘tools/build/NQP_REVISION’;
+    for run(:cwd(REPO-LATEST), :out, |@args-bumps)
+      .out.split(0.chr, :skip-empty).rotor(2) -> ($rakudo-sha, $diff) {
+        #my $nqp-old = get-build-revision REPO-LATEST, “$rakudo-sha^”, ‘NQP_REVISION’;
+        #my $nqp-new = get-build-revision REPO-LATEST, “$rakudo-sha”,  ‘NQP_REVISION’;
+
+        #say “$rakudo-sha”;
+        for run(:cwd(RAKUDO-NQP-LATEST), :out, |@git-log, “$nqp-old..$nqp-new”)
+          .out.split(0.chr, :skip-empty) -> $nqp-sha {
+            my $moar-sha = get-build-revision RAKUDO-NQP-LATEST, “$nqp-sha”, ‘MOAR_REVISION’;
+            # TODO shas are not shas
+            say “|- $nqp-sha - $moar-sha”;
+        }
+        for run(:cwd(RAKUDO-NQP-LATEST), :out, |@git-log, ‘--follow’, ‘--reverse’,
+                “$nqp-old..$nqp-new”, ‘tools/build/MOAR_REVISION’)
+          .out.split(0.chr, :skip-empty) -> $nqp-sha {
+            my $moar-old = get-build-revision RAKUDO-NQP-LATEST, “$nqp-sha^”, ‘MOAR_REVISION’;
+            my $moar-new = get-build-revision RAKUDO-NQP-LATEST, “$nqp-sha”,  ‘MOAR_REVISION’;
+            for run(:cwd(RAKUDO-MOAR-LATEST), :out, |@git-log, “$moar-old..$moar-new”)
+              .out.split(0.chr, :skip-empty) -> $moar-sha {
+                say “   |- $moar-sha”;
+            }
+        }
+    }
+}
+# ｣｣｣
+
 
 await (for ^PARALLEL-COUNT { # TODO rewrite when .race starts working in rakudo
               start loop {
@@ -99,7 +151,8 @@ await (for ^PARALLEL-COUNT { # TODO rewrite when .race starts working in rakudo
           });
 
 # update repo so that bots know about latest commits
-run ‘git’, ‘--git-dir’, “{REPO-CURRENT}/.git”, ‘--work-tree’, REPO-CURRENT, ‘pull’, ‘--tags’, REPO-LATEST;
+run :cwd(REPO-CURRENT), <git pull --tags>, REPO-LATEST;
+run :cwd(REPO-CURRENT), <git fetch --all>;
 
 sub process-commit($commit) {
     return if “{ARCHIVES-LOCATION}/$commit.zst”.IO ~~ :e; # already exists
@@ -112,10 +165,9 @@ sub process-commit($commit) {
     my $archive-path = “{ARCHIVES-LOCATION}/$commit.zst”.IO.absolute;
 
     # ⚡ clone
-    run ‘git’, ‘clone’, ‘-q’, ‘--’, REPO-LATEST, $temp-folder;
+    run <git clone -q -->, REPO-LATEST, $temp-folder;
     # ⚡ checkout to $commit
-    my @git-temp = ‘git’, ‘--git-dir’, “$temp-folder/.git”, ‘--work-tree’, $temp-folder;
-    run |@git-temp, ‘reset’, ‘-q’, ‘--hard’, $commit;
+    run :cwd($temp-folder), <git reset -q --hard>, $commit;
 
     # No :merge for log files because RT #125756 RT #128594
 
@@ -132,16 +184,16 @@ sub process-commit($commit) {
 
         my @args = do given PROJECT {
             when MoarVM {
-                ‘perl’, ‘--’, ‘Configure.pl’, “--prefix=$build-path”,
-                        ‘--debug=3’
+                |<perl -- Configure.pl>, “--prefix=$build-path”,
+                     ‘--debug=3’
             }
             when Rakudo-Moar {
-                 ‘perl’, ‘--’, ‘Configure.pl’, “--prefix=$build-path”,
-                         ‘--gen-moar’, ‘--gen-nqp’, ‘--backends=moar’
+                |<perl -- Configure.pl>, “--prefix=$build-path”,
+                     |<--gen-moar --gen-nqp --backends=moar>
             }
         }
-        if PROJECT == Rakudo-Moar and run ‘grep’, ‘-m1’, ‘-q’, ‘--’,
-                                          ‘--git-reference’, ‘Configure.pl’ {
+        if PROJECT == Rakudo-Moar
+        and run <grep -m1 -q -- --git-reference Configure.pl> {
             @args.push: “--git-reference={GIT-REFERENCE}”
         }
 
@@ -159,10 +211,10 @@ sub process-commit($commit) {
         my $make-log-fh = open :w, “$log-path/make.log”;
         my $make-err-fh = open :w, “$log-path/make.err”;
         my @args = do given PROJECT {
-            when MoarVM      { ‘make’, ‘-j’, ‘7’, ‘-C’, $temp-folder }
-            when Rakudo-Moar { ‘make’,            ‘-C’, $temp-folder }
+            when MoarVM      { |<make -j 7 -C>, $temp-folder }
+            when Rakudo-Moar { |<make      -C>, $temp-folder }
         }
-        $make-ok = run :out($make-log-fh), :err($make-err-fh), |@args;
+        $make-ok = run :out($make-log-fh), :err($make-err-fh), @args;
         $make-log-fh.close;
         $make-err-fh.close;
         say “»»»»» Cannot make $commit” unless $make-ok;
@@ -173,7 +225,7 @@ sub process-commit($commit) {
         my $install-log-fh = open :w, “$log-path/make-install.log”;
         my $install-err-fh = open :w, “$log-path/make-install.err”;
         my $install-ok = run(:out($install-log-fh), :err($install-err-fh),
-                             ‘make’, ‘-C’, $temp-folder, ‘install’);
+                             <make -C>, $temp-folder, ‘install’);
         $install-log-fh.close;
         $install-err-fh.close;
         say “»»»»» Cannot install $commit” unless $install-ok;
@@ -182,8 +234,8 @@ sub process-commit($commit) {
     # ⚡ compress
     # No matter what we got, compress it
     say “»»»»» $commit: compressing”;
-    my $proc = run(:out, :bin, ‘tar’, ‘cf’, ‘-’, ‘--absolute-names’, ‘--remove-files’, ‘--’, $build-path);
-    run(:in($proc.out), :bin, ‘zstd’, ‘-c’, ‘-19’, ‘-q’, ‘-o’, $archive-path);
+    my $proc = run(:out, :bin, <tar cf - --absolute-names --remove-files -->, $build-path);
+    run(:in($proc.out), :bin, <zstd -c -19 -q -o>, $archive-path);
 
     rmtree $temp-folder;
 }

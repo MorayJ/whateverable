@@ -8,14 +8,14 @@ use Testable;
 
 my $t = Testable.new: bot => ‘Notable’;
 
-$t.common-tests: help => “Like this: {$t.bot-nick}: weekly rakudo is now 10x faster”;
+$t.common-tests: help => “Like this: {$t.bot-nick}: weekly rakudo is now 10x as fast”;
 
-$t.shortcut-tests: <note: note6: weekly:>,
-                   <note weekly>;
+$t.shortcut-tests: (‘weekly:’,),
+                   <note: note weekly>;
 
 $t.test(‘fallback’,
         “{$t.bot-nick}: wazzup?”,
-        “{$t.our-nick}, I cannot recognize this command. See wiki for some examples: https://github.com/perl6/whateverable/wiki/Notable”);
+        “{$t.our-nick}, I cannot recognize this command. See wiki for some examples: https://github.com/Raku/whateverable/wiki/Notable”);
 
 # No notes
 
@@ -43,17 +43,25 @@ $t.test(‘list topics’,
 
 # Creating notes
 
-$t.test(‘note something’,
+$t.test(:!both, ‘create new topic’,
+        “{$t.bot-nick}: new-topic blah”,
+        “{$t.our-nick}, New topic added (“blah”)”);
+
+$t.test(‘try to create the same topic again’,
+        “{$t.bot-nick}: new-topic blah”,
+        “{$t.our-nick}, Topic “blah” already exists”);
+
+$t.test(:!both, ‘note something’,
         “{$t.bot-nick}: blah foo”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (blah)”);
 
 $t.test(‘list topics (with notes)’,
         “{$t.bot-nick}: list”,
         “{$t.our-nick}, blah”);
 
-$t.test(‘note something (shortcut)’,
+$t.test(:!both, ‘note something (shortcut)’,
         “weekly: Monday”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (weekly)”);
 
 $t.test(‘list topics (with notes)’,
         “{$t.bot-nick}: list”,
@@ -74,12 +82,12 @@ $t.test(‘list notes (shortcut)’,
 my $moved;
 my $moved-shortcut;
 
-$t.test(‘clear’,
+$t.test(:!both, ‘clear’,
         “{$t.bot-nick}: clear blah”,
         /^<me($t)>‘, Moved existing notes to “blah_’<date>‘”’$
           {$moved=$<date>}/);
 
-$t.test(‘clear (shortcut)’,
+$t.test(:!both, ‘clear (shortcut)’,
         “weekly: clear”,
         /^<me($t)>‘, Moved existing notes to “weekly_’<date>‘”’$
           {$moved-shortcut=$<date>}/);
@@ -101,13 +109,17 @@ $t.test(‘empty after clearing (shortcut)’,
         “{$t.our-nick}, No notes for “weekly””);
 
 
-$t.test(‘note something after clearing’,
-        “{$t.bot-nick}: blah foo”,
-        “{$t.our-nick}, Noted!”);
+$t.test(:!both, ‘re-create blah topic’,
+        “{$t.bot-nick}: new-category blah”,
+        “{$t.our-nick}, New topic added (“blah”)”);
 
-$t.test(‘note something after clearing (shortcut)’,
+$t.test(:!both, ‘note something after clearing’,
+        “{$t.bot-nick}: blah foo”,
+        “{$t.our-nick}, Noted! (blah)”);
+
+$t.test(:!both, ‘note something after clearing (shortcut)’,
         “weekly: Monday”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (weekly)”);
 
 $t.test(‘list notes after clearing’,
         “{$t.bot-nick}: blah”,
@@ -117,13 +129,13 @@ $t.test(‘list notes after clearing (shortcut)’,
         “weekly:”,
         /^<me($t)>‘, 1 note: ’<date>‘ <’<me($t)>‘>: Monday’$/);
 
-$t.test(‘note something again’,
+$t.test(:!both, ‘note something again’,
         “{$t.bot-nick}: blah bar”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (blah)”);
 
-$t.test(‘note something again (shortcut)’,
+$t.test(:!both, ‘note something again (shortcut)’,
         “weekly: Tuesday”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (weekly)”);
 
 
 $t.test(‘list two notes’,
@@ -134,13 +146,13 @@ $t.test(‘list two notes (shortcut)’,
         “weekly:”,
         /^<me($t)>‘, 2 notes: ’<date>‘ <’<me($t)>‘>: Monday  ;  ’<date>‘ <’<me($t)>‘>: Tuesday’$/);
 
-$t.test(‘note something big’,
+$t.test(:!both, ‘note something big’,
         “{$t.bot-nick}: blah {‘z’ x 300}”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (blah)”);
 
-$t.test(‘note something big (shortcut)’,
+$t.test(:!both, ‘note something big (shortcut)’,
         “weekly: {‘Z’ x 300}”,
-        “{$t.our-nick}, Noted!”);
+        “{$t.our-nick}, Noted! (weekly)”);
 
 # DWIM
 
@@ -169,6 +181,15 @@ $t.test(‘… delete’,
         “{$t.bot-nick}: DWIM delete”,
         “{$t.our-nick}, No notes for “DWIM””);
 
+
+$t.test(:!both, ‘no topic specified’,
+        “{$t.bot-nick}: just note it somewhere”,
+        “{$t.our-nick}, Noted! (weekly)”);
+
+$t.test(‘no new topic created’,
+        “{$t.bot-nick}: just”,
+        “{$t.our-nick}, No notes for “just””);
+
 # TODO adapt test once the format is changed to markdown
 
 $t.test(‘gist’,
@@ -178,16 +199,19 @@ $t.test(‘gist’,
 $t.test-gist(‘correct gist’,
              %(‘result’ => /^<date>‘ <’$($t.our-nick)‘>: foo’\n
                              <date>‘ <’$($t.our-nick)‘>: bar’\n
-                             <date>‘ <’$($t.our-nick)‘>: ’$(‘z’ x 300)$/));
+                             <date>‘ <’$($t.our-nick)‘>: ’$(‘z’ x 300)
+                             $/));
 
 $t.test(‘gist (shortcut)’,
         “weekly:”,
-        “{$t.our-nick}, 3 notes: https://whatever.able/fakeupload”);
+        “{$t.our-nick}, 4 notes: https://whatever.able/fakeupload”);
 
 $t.test-gist(‘correct gist (shortcut)’,
              %(‘result’ => /^<date>‘ <’$($t.our-nick)‘>: Monday’\n
                              <date>‘ <’$($t.our-nick)‘>: Tuesday’\n
-                             <date>‘ <’$($t.our-nick)‘>: ’$(‘Z’ x 300)$/));
+                             <date>‘ <’$($t.our-nick)‘>: ’$(‘Z’ x 300)\n
+                             <date>‘ <’$($t.our-nick)‘>: just note it somewhere’
+                             $/));
 
 $t.last-test;
 done-testing;

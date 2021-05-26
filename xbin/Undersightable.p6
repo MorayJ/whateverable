@@ -90,7 +90,6 @@ irclog.perlgeek.de/moarvm/today
 colabti.org/irclogger/irclogger_log/perl6
 colabti.org/irclogger/irclogger_logs/perl6
 
-6lang.party
 6lang.org
 design.6lang.org
 doc.6lang.org
@@ -274,7 +273,7 @@ method check-version-mentions() {
 }
 
 multi method irc-to-me($msg where /check|status|info|test|log/) {
-    $msg.reply: ‘OK! Working on it…’;
+    reply $msg, ‘OK! Working on it…’;
     start {
         my @jobs = (
             { gather check-websites },
@@ -291,8 +290,6 @@ multi method irc-to-me($msg where /check|status|info|test|log/) {
     }
 }
 
-
-my %*BOT-ENV;
 
 Undersightable.new.selfrun: ‘undersightable6’, [ fuzzy-nick(‘undersightable6’, 3) ]
 
